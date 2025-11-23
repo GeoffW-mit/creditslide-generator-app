@@ -3,7 +3,7 @@ from flask import Flask, request, render_template, send_from_directory
 import pandas as pd
 import os
 import zipfile
-from generate_slides import create_ppt_from_dataframe
+from slide_generator import create_ppt_from_dataframe
 
 app = Flask(__name__)
 

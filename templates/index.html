@@ -1,0 +1,21 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create PPT from CSV</title>
+</head>
+<body>
+    <h1>Upload CSV and Generate PPT Slides</h1>
+    <form action="/process" method="post" enctype="SV File:</label><br>
+        <input type="file" name="csv_file" accept=".csv" required><br><br>
+
+        <label for="template_path">Google Drive Template Path:</label><br>
+        <input type="text" name="template_path" placeholder="Enter template path" required><br><br>
+
+        <label for="output_dir">Google Drive Output Directory:</label><br>
+        <input type="text" name="output_dir" placeholder="Enter output directory" required><br><br>
+
+        <button type="submit">Generate PPT</button>
+    </form>
+</body>
+</html>

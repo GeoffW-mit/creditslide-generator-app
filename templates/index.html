@@ -3,10 +3,20 @@
 <html>
 <head>
     <title>Create PPT from CSV</title>
+    <style>
+        #spinner {
+            display: none;
+            font-size: 18px;
+            color: #333;
+        }
+        #download-link {
+            margin-top: 20px;
+        }
+    </style>
 </head>
 <body>
     <h1>Upload CSV and PPT Template to Generate Slides</h1>
-    /process
+    <form id="uploadForm" enctype="multipart/form-data">
         <label for="csv_file">Upload CSV File:</label><br>
         <input type="file" name="csv_file" accept=".csv" required><br><br>
 
@@ -15,5 +25,41 @@
 
         <button type="submit">Generate PPT</button>
     </form>
+
+    <div id="spinner">⏳ Generating PPT files, please wait...</div>
+    <div id="download-link"></div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', function(e) {
+            e.preventDefault(); // Prevent normal form submission
+            const formData = new FormData(this);
+
+            // Show spinner
+            document.getElementById('spinner').style.display = 'block';
+            document.getElementById('download-link').innerHTML = '';
+
+            fetch('/process', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json()) // Expect JSON from Flask
+            .then(data => {
+                document.getElementById('spinner').style.display = 'none';
+                if (data.success) {
+                    document.getElementById('download-link').innerHTML =
+                        `<h3>✅ PPT files generated!</h3>
+                         <a href="${data.download_url}" download</a>`;
+                } else {
+                    document.getElementById('download-link').innerHTML =
+                        `<p style="color:red;">❌ Error: ${data.error}</p>`;
+                }
+            })
+            .catch(err => {
+                document.getElementById('spinner').style.display = 'none';
+                document.getElementById('download-link').innerHTML =
+                    `<p style="color:red;">❌ Failed to generate PPTs.</p>`;
+            });
+        });
+    </script>
 </body>
 </html>

@@ -4,22 +4,14 @@
 <head>
     <title>Create PPT from CSV</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-        }
         #spinner {
             display: none;
             font-size: 18px;
             color: #333;
-            margin-top: 15px;
+            margin-top: 20px;
         }
         #download-link {
             margin-top: 20px;
-            font-size: 16px;
-        }
-        .error {
-            color: red;
         }
     </style>
 </head>
@@ -43,7 +35,7 @@
             e.preventDefault(); // Prevent normal form submission
             const formData = new FormData(this);
 
-            // Show spinner and clear previous messages
+            // Show spinner
             document.getElementById('spinner').style.display = 'block';
             document.getElementById('download-link').innerHTML = '';
 
@@ -57,17 +49,16 @@
                 if (data.success) {
                     document.getElementById('download-link').innerHTML =
                         `<h3>✅ PPT files generated!</h3>
-                         ${data.download_url}Download All as ZIP</a>`;
+                         <a href="${data.download_url}" download</a>`;
                 } else {
                     document.getElementById('download-link').innerHTML =
-                        `<p class="error">❌ Error: ${data.error}</p>`;
+                        `<p style="color:red;">❌ Error: ${data.error}</p>`;
                 }
             })
             .catch(err => {
                 document.getElementById('spinner').style.display = 'none';
                 document.getElementById('download-link').innerHTML =
-                    `<p class="error">❌ Failed to generate PPTs. Please check console.</p>`;
-                console.error("Fetch error:", err);
+                    `<p style="color:red;">❌ Failed to generate PPTs.</p>`;
             });
         });
     </script>

@@ -21,7 +21,6 @@ def process():
     try:
         print("\n=== ✅ /process route hit ===")
 
-        # Check uploaded files
         csv_file = request.files.get('csv_file')
         template_file = request.files.get('template_file')
         if not csv_file or not template_file:

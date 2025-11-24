@@ -4,14 +4,24 @@
 <head>
     <title>Create PPT from CSV</title>
     <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
         #spinner {
             display: none;
             font-size: 18px;
             color: #333;
-            margin-top: 20px;
+            margin-top: 15px;
         }
         #download-link {
             margin-top: 20px;
+            font-size: 18px;
+        }
+        button {
+            padding: 10px 15px;
+            font-size: 16px;
+            cursor: pointer;
         }
     </style>
 </head>
@@ -35,7 +45,7 @@
             e.preventDefault(); // Prevent normal form submission
             const formData = new FormData(this);
 
-            // Show spinner
+            // Show spinner and clear previous link
             document.getElementById('spinner').style.display = 'block';
             document.getElementById('download-link').innerHTML = '';
 
@@ -49,7 +59,7 @@
                 if (data.success) {
                     document.getElementById('download-link').innerHTML =
                         `<h3>✅ PPT files generated!</h3>
-                         <a href="${data.download_url}" download</a>`;
+                         <p>${data.download_url}Download All as ZIP</a></p>`;
                 } else {
                     document.getElementById('download-link').innerHTML =
                         `<p style="color:red;">❌ Error: ${data.error}</p>`;

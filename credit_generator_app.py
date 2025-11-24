@@ -75,3 +75,14 @@ def process():
         })
 
     except Exception as e:
+        print("❌ Error occurred:", str(e))
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route('/download_zip/<filename>')
+def download_zip(filename):
+    print(f"▶ Download request for {filename}")
+    return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+
+if __name__ == '__main__':
+    print("🚀 Flask app starting...")
+    app.run(debug=True)

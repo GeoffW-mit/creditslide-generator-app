@@ -4,24 +4,25 @@
 <head>
     <title>Create PPT from CSV</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-        }
         #spinner {
             display: none;
             font-size: 18px;
             color: #333;
-            margin-top: 15px;
         }
         #download-link {
             margin-top: 20px;
-            font-size: 18px;
         }
-        button {
-            padding: 10px 15px;
-            font-size: 16px;
-            cursor: pointer;
+        #csv-preview {
+            margin-top: 20px;
+            border-collapse: collapse;
+        }
+        #csv-preview th, #csv-preview td {
+            border: 1px solid #ccc;
+            padding: 5px;
+        }
+        #csv-info {
+            margin-top: 10px;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -29,7 +30,7 @@
     <h1>Upload CSV and PPT Template to Generate Slides</h1>
     <form id="uploadForm" enctype="multipart/form-data">
         <label for="csv_file">Upload CSV File:</label><br>
-        <input type="file" name="csv_file" accept=".csv" required><br><br>
+        <input type="file" name="csv_file" id="csv_file" accept=".csv" required><br><br>
 
         <label for="template_file">Upload PPT Template:</label><br>
         <input type="file" name="template_file" accept=".pptx" required><br><br>
@@ -40,12 +41,50 @@
     <div id="spinner">⏳ Generating PPT files, please wait...</div>
     <div id="download-link"></div>
 
+    <h3>CSV Preview:</h3>
+    <div id="csv-info"></div>
+    <table id="csv-preview"></table>
+
     <script>
+        // ✅ Preview CSV and show row/column count
+        document.getElementById('csv_file').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const text = event.target.result;
+                const rows = text.trim().split('\n').map(row => row.split(','));
+                const previewTable = document.getElementById('csv-preview');
+                const infoDiv = document.getElementById('csv-info');
+
+                previewTable.innerHTML = '';
+                infoDiv.innerHTML = '';
+
+                const totalRows = rows.length - 1; // exclude header
+                const totalCols = rows[0].length;
+
+                infoDiv.textContent = `Rows: ${totalRows}, Columns: ${totalCols}`;
+
+                // Show first 5 rows
+                rows.slice(0, 6).forEach((row, index) => {
+                    const tr = document.createElement('tr');
+                    row.forEach(cell => {
+                        const td = document.createElement(index === 0 ? 'th' : 'td');
+                        td.textContent = cell.trim();
+                        tr.appendChild(td);
+                    });
+                    previewTable.appendChild(tr);
+                });
+            };
+            reader.readAsText(file);
+        });
+
+        // ✅ Handle form submission
         document.getElementById('uploadForm').addEventListener('submit', function(e) {
-            e.preventDefault(); // Prevent normal form submission
+            e.preventDefault();
             const formData = new FormData(this);
 
-            // Show spinner and clear previous link
             document.getElementById('spinner').style.display = 'block';
             document.getElementById('download-link').innerHTML = '';
 
@@ -53,13 +92,13 @@
                 method: 'POST',
                 body: formData
             })
-            .then(response => response.json()) // Expect JSON from Flask
+            .then(response => response.json())
             .then(data => {
                 document.getElementById('spinner').style.display = 'none';
                 if (data.success) {
                     document.getElementById('download-link').innerHTML =
                         `<h3>✅ PPT files generated!</h3>
-                         <p><a href='${data.download_url}'>Download All as ZIP</a></p>`;
+                         <p><a href="${data.downloadload All as ZIP</a></p>`;
                 } else {
                     document.getElementById('download-link').innerHTML =
                         `<p style="color:red;">❌ Error: ${data.error}</p>`;

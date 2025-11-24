@@ -14,31 +14,33 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html')  # Updated HTML form
 
 @app.route('/process', methods=['POST'])
 def process():
     csv_file = request.files['csv_file']
-    template_path = request.form['template_path']
+    template_file = request.files['template_file']
 
     # ✅ Clear old files before generating new ones
     for old_file in os.listdir(OUTPUT_FOLDER):
         os.remove(os.path.join(OUTPUT_FOLDER, old_file))
 
-    # Save CSV temporarily
+    # Save uploaded files
     csv_path = os.path.join(UPLOAD_FOLDER, csv_file.filename)
+    template_path = os.path.join(UPLOAD_FOLDER, template_file.filename)
     csv_file.save(csv_path)
+    template_file.save(template_path)
 
-    # Generate PPT files locally
+    # Generate PPT files
     df = pd.read_csv(csv_path)
     create_ppt_from_dataframe(df, template_path, OUTPUT_FOLDER)
 
-    # Create ZIP file of all PPTs
+    # Create ZIP of all PPTs
     zip_filename = "generated_slides.zip"
     zip_path = os.path.join(OUTPUT_FOLDER, zip_filename)
     with zipfile.ZipFile(zip_path, 'w') as zipf:
         for filename in os.listdir(OUTPUT_FOLDER):
-            if filename.endswith(".pptx"):
+            if filename.endswith('.pptx'):
                 zipf.write(os.path.join(OUTPUT_FOLDER, filename), filename)
 
     return f"""

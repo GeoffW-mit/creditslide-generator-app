@@ -22,9 +22,8 @@ def create_ppt_from_dataframe(df, template_path, output_dir):
     for resource_name, resource_group in df.groupby('resource_name'):
         prs = Presentation(template_path)
         reference_layout_map = {
-            'excluded': prs.slides[2].slide_layout,
-            'permission': prs.slides[3].slide_layout,
-            'aigen': prs.slides[4].slide_layout
+            'excluded': prs.slides[1].slide_layout,
+            'permission': prs.slides[2].slide_layout,
         }
         xml_slides = prs.slides._sldIdLst
         insert_index = 2

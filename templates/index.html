@@ -1,114 +1,201 @@
-
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Create PPT from CSV</title>
     <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 2rem;
+            max-width: 900px;
+        }
+
+        label {
+            font-weight: bold;
+        }
+
+        input[type="file"] {
+            margin-top: 0.4rem;
+        }
+
+        .field {
+            margin: 1.2rem 0;
+        }
+
+        .help {
+            color: #555;
+            font-size: 0.95rem;
+            margin-top: 0.35rem;
+        }
+
         #spinner {
             display: none;
-            font-size: 18px;
-            color: #333;
+            margin-top: 1rem;
         }
-        #download-link {
-            margin-top: 20px;
+
+        #download-link,
+        #csv-info {
+            margin-top: 1.2rem;
         }
+
         #csv-preview {
-            margin-top: 20px;
             border-collapse: collapse;
+            margin-top: 0.5rem;
         }
-        #csv-preview th, #csv-preview td {
+
+        #csv-preview th,
+        #csv-preview td {
             border: 1px solid #ccc;
             padding: 5px;
+            text-align: left;
         }
-        #csv-info {
-            margin-top: 10px;
-            font-weight: bold;
+
+        #error-message {
+            color: #b00020;
+            white-space: pre-wrap;
         }
     </style>
 </head>
 <body>
-    <h1>Upload CSV and PPT Template to Generate Slides</h1>
+    <h1>Generate Attribution Slides</h1>
+
     <form id="uploadForm" enctype="multipart/form-data">
-        <label for="csv_file">Upload CSV File:</label><br>
-        <input type="file" name="csv_file" id="csv_file" accept=".csv" required><br><br>
+        <div class="field">
+            <label for="csv_file">Attribution CSV:</label><br>
+            <input
+                type="file"
+                name="csv_file"
+                id="csv_file"
+                accept=".csv"
+                required
+            >
+        </div>
 
-        <label for="template_file">Upload PPT Template:</label><br>
-        <input type="file" name="template_file" accept=".pptx" required><br><br>
+        <div class="field">
+            <label for="template_file">PowerPoint template:</label><br>
+            <input
+                type="file"
+                name="template_file"
+                id="template_file"
+                accept=".pptx"
+                required
+            >
+        </div>
 
-        <button type="submit">Generate PPT</button>
+        <div class="field">
+            <label for="font_files">Font files:</label><br>
+            <input
+                type="file"
+                name="font_files"
+                id="font_files"
+                accept=".zip,.ttf,.otf"
+                multiple
+                required
+            >
+            <div class="help">
+                Upload the font ZIP, or select the individual .ttf/.otf files.
+                You may select multiple font files. The uploaded fonts are used
+                during generation and then removed from the server.
+            </div>
+        </div>
+
+        <button id="submit-button" type="submit">Generate PowerPoints</button>
     </form>
 
-    <div id="spinner">⏳ Generating PPT files, please wait...</div>
+    <div id="spinner" role="status">Generating slides. Please wait...</div>
     <div id="download-link"></div>
+    <div id="error-message"></div>
 
-    <h3>CSV Preview:</h3>
+    <h2>CSV Preview</h2>
     <div id="csv-info"></div>
     <table id="csv-preview"></table>
 
     <script>
-        // ✅ Preview CSV and show row/column count
-        document.getElementById('csv_file').addEventListener('change', function(e) {
-            const file = e.target.files[0];
+        const uploadForm = document.getElementById("uploadForm");
+        const spinner = document.getElementById("spinner");
+        const downloadDiv = document.getElementById("download-link");
+        const errorDiv = document.getElementById("error-message");
+        const submitButton = document.getElementById("submit-button");
+
+        // Basic CSV preview. This is only for display; the server reads the
+        // CSV using pandas.
+        document.getElementById("csv_file").addEventListener("change", function (event) {
+            const file = event.target.files[0];
             if (!file) return;
 
             const reader = new FileReader();
-            reader.onload = function(event) {
-                const text = event.target.result;
-                const rows = text.trim().split('\n').map(row => row.split(','));
-                const previewTable = document.getElementById('csv-preview');
-                const infoDiv = document.getElementById('csv-info');
 
-                previewTable.innerHTML = '';
-                infoDiv.innerHTML = '';
+            reader.onload = function (loadEvent) {
+                const text = loadEvent.target.result.trim();
+                const rows = text
+                    ? text.split(/\r?\n/).map(row => row.split(","))
+                    : [];
 
-                const totalRows = rows.length - 1; // exclude header
-                const totalCols = rows[0].length;
+                const previewTable = document.getElementById("csv-preview");
+                const infoDiv = document.getElementById("csv-info");
 
-                infoDiv.textContent = `Rows: ${totalRows}, Columns: ${totalCols}`;
+                previewTable.replaceChildren();
+                infoDiv.textContent = "";
 
-                // Show first 5 rows
-                rows.slice(0, 6).forEach((row, index) => {
-                    const tr = document.createElement('tr');
+                if (rows.length === 0) return;
+
+                infoDiv.textContent =
+                    `Rows: ${Math.max(rows.length - 1, 0)}, ` +
+                    `Columns: ${rows[0].length}`;
+
+                rows.slice(0, 6).forEach((row, rowIndex) => {
+                    const tr = document.createElement("tr");
+
                     row.forEach(cell => {
-                        const td = document.createElement(index === 0 ? 'th' : 'td');
-                        td.textContent = cell.trim();
-                        tr.appendChild(td);
+                        const cellElement = document.createElement(
+                            rowIndex === 0 ? "th" : "td"
+                        );
+                        cellElement.textContent = cell.trim();
+                        tr.appendChild(cellElement);
                     });
+
                     previewTable.appendChild(tr);
                 });
             };
+
             reader.readAsText(file);
         });
 
-        // ✅ Handle form submission
-        document.getElementById('uploadForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
+        uploadForm.addEventListener("submit", async function (event) {
+            event.preventDefault();
 
-            document.getElementById('spinner').style.display = 'block';
-            document.getElementById('download-link').innerHTML = '';
+            spinner.style.display = "block";
+            downloadDiv.replaceChildren();
+            errorDiv.textContent = "";
+            submitButton.disabled = true;
 
-            fetch('/process', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                document.getElementById('spinner').style.display = 'none';
-                if (data.success) {
-                    document.getElementById('download-link').innerHTML =
-                        `<h3>✅ PPT files generated!</h3>
-                         <p><a href="/download_zip/generated_slides.zip">download All as ZIP</a></p>`;
-                } else {
-                    document.getElementById('download-link').innerHTML =
-                        `<p style="color:red;">❌ Error: ${data.error}</p>`;
+            try {
+                const response = await fetch("/process", {
+                    method: "POST",
+                    body: new FormData(uploadForm)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.error || "Slide generation failed.");
                 }
-            })
-            .catch(err => {
-                document.getElementById('spinner').style.display = 'none';
-                document.getElementById('download-link').innerHTML =
-                    `<p style="color:red;">❌ Failed to generate PPTs.</p>`;
-            });
+
+                const heading = document.createElement("h3");
+                heading.textContent = "PowerPoints generated";
+                downloadDiv.appendChild(heading);
+
+                const link = document.createElement("a");
+                link.href = data.download_url;
+                link.textContent = "Download generated slides as ZIP";
+                downloadDiv.appendChild(link);
+            } catch (error) {
+                errorDiv.textContent = `Error: ${error.message}`;
+            } finally {
+                spinner.style.display = "none";
+                submitButton.disabled = false;
+            }
         });
     </script>
 </body>

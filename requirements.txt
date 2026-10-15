@@ -2,3 +2,4 @@ Flask
 pandas
 python-pptx
 gunicorn
+lxml

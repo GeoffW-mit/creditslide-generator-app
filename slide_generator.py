@@ -26,22 +26,30 @@ MAX_ATTRIBUTIONS_PER_SLIDE = 4
 MAX_FONT_SIZE = 18
 MIN_FONT_SIZE = 14
 
+# Slide numbers here are 1-based.
+EXCLUDED_SAMPLE_SLIDE_NUMBER = 2
+PERMISSION_SAMPLE_SLIDE_NUMBER = 3
+END_SLATE_TEMPLATE_SLIDE_NUMBER = 4
+
+# From the attached script: use slide 5 as the aigen sample if it exists.
+# If the template has no slide 5, aigen falls back to the excluded layout.
+AIGEN_SAMPLE_SLIDE_NUMBER = 5
+
 DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
-# python-pptx uses a process-wide font cache. This lock prevents two
-# simultaneous requests from changing/scanning that cache at the same time.
+# python-pptx keeps a process-wide font cache. This lock prevents concurrent
+# requests from changing or scanning the cache at the same time.
 _FONT_LOCK = threading.RLock()
 
-# Keep a reference to the original method, before replacing it for Linux.
+# Retain python-pptx's original method before configuring font search paths.
 _ORIGINAL_FONT_DIRECTORIES = FontFiles._font_directories
 
 
 def configure_font_search(font_dir=None):
-    """Include system font folders and this request's uploaded font folder."""
+    """Include system font folders and the uploaded font folder in font search."""
     try:
         directories = list(_ORIGINAL_FONT_DIRECTORIES())
-    except (OSError, AttributeError):
-        # Some python-pptx versions do not recognize Linux font directories.
+    except (OSError, AttributeError, TypeError):
         directories = []
 
     directories.extend([
@@ -54,7 +62,6 @@ def configure_font_search(font_dir=None):
     if font_dir:
         directories.insert(0, os.path.abspath(font_dir))
 
-    # Remove duplicates and nonexistent directories.
     unique_directories = []
     seen = set()
 
@@ -63,23 +70,25 @@ def configure_font_search(font_dir=None):
             continue
 
         directory = os.path.abspath(directory)
+
         if directory not in seen and os.path.isdir(directory):
             unique_directories.append(directory)
             seen.add(directory)
 
-    # Replace python-pptx's platform font-directory method for this process.
+    # Override python-pptx's platform font-directory method for this process.
     FontFiles._font_directories = classmethod(
         lambda cls: list(unique_directories)
     )
 
-    # Force python-pptx to rescan, including the just-uploaded font files.
+    # Make python-pptx rescan so it can find fonts uploaded with this request.
     FontFiles._font_files = None
 
 
 def get_template_font_style(prs, sample_slide):
-    """Read the BODY font family and styling from a sample slide."""
+    """Get the BODY font family and styling from a sample slide."""
     body_shape = None
 
+    # Prefer the BODY placeholder with index 2, matching the original script.
     for shape in sample_slide.placeholders:
         if (
             shape.placeholder_format.type == PP_PLACEHOLDER.BODY
@@ -88,6 +97,7 @@ def get_template_font_style(prs, sample_slide):
             body_shape = shape
             break
 
+    # Otherwise, use the first BODY placeholder.
     if body_shape is None:
         for shape in sample_slide.placeholders:
             if shape.placeholder_format.type == PP_PLACEHOLDER.BODY:
@@ -116,7 +126,7 @@ def get_template_font_style(prs, sample_slide):
             if font_family is not None:
                 break
 
-    # If the BODY text inherits its font, use the theme's body font.
+    # If the sample placeholder inherits its font, use the theme body font.
     if font_family is None and prs.slide_masters:
         for rel in prs.slide_masters[0].part.rels.values():
             if rel.reltype.endswith("/theme"):
@@ -146,7 +156,7 @@ def get_template_font_style(prs, sample_slide):
 
 
 def get_body_shape(slide):
-    """Find the preferred BODY placeholder on the generated slide."""
+    """Find the preferred BODY placeholder on a generated slide."""
     for shape in slide.placeholders:
         if (
             shape.placeholder_format.type == PP_PLACEHOLDER.BODY
@@ -173,10 +183,10 @@ def add_fallback_textbox(slide, prs):
 
 def set_fitted_text(shape, text, font_style):
     """
-    Fit text at up to 18 pt, retaining the template's font family.
+    Fit text at up to 18 pt using the font family from the template.
 
-    Returns the size selected by python-pptx. The caller tests whether it is
-    at least 14 pt.
+    Returns the size selected by python-pptx. The caller checks if it is at
+    least 14 pt.
     """
     text_frame = shape.text_frame
     text_frame.text = text
@@ -194,9 +204,9 @@ def set_fitted_text(shape, text, font_style):
         )
     except (KeyError, OSError) as exc:
         raise RuntimeError(
-            f"Could not find or measure the uploaded template font "
-            f"{font_style['font_family']!r}. Upload the matching font file(s) "
-            "for the template, including the required weight/style."
+            f"Could not find or measure the template font "
+            f"{font_style['font_family']!r}. Upload the matching font files, "
+            "including the required weight or style."
         ) from exc
 
     fitted_sizes = [
@@ -208,7 +218,7 @@ def set_fitted_text(shape, text, font_style):
 
     fitted_size = min(fitted_sizes, default=MAX_FONT_SIZE)
 
-    # Preserve the font family and fitted size on all text runs.
+    # Apply the calculated size and retain the template's font styling.
     for paragraph in text_frame.paragraphs:
         for run in paragraph.runs:
             run.font.name = font_style["font_family"]
@@ -235,14 +245,57 @@ def get_attribution_text(row):
 
 def safe_filename_part(value):
     """Make a resource name safe to use in an output filename."""
-    text = str(value)
-    text = re.sub(r"[^A-Za-z0-9._-]+", "_", text)
+    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value))
     text = text.strip("._")
     return text or "resource"
 
 
+def retain_generated_slides_and_end_slate(
+    prs,
+    original_slide_ids,
+    end_slate_id,
+):
+    """Keep generated slides plus the original end slate, and move it last."""
+    slide_id_list = prs.slides._sldIdLst
+    original_ids = {slide_id.id for slide_id in original_slide_ids}
+
+    # Generated slide IDs were not part of the template.
+    generated_slide_ids = [
+        slide_id
+        for slide_id in list(slide_id_list)
+        if slide_id.id not in original_ids
+    ]
+
+    keep_ids = {slide_id.id for slide_id in generated_slide_ids}
+    keep_ids.add(end_slate_id.id)
+
+    # Remove original template slides except the end slate.
+    for slide_id in list(slide_id_list):
+        if slide_id.id not in keep_ids:
+            relationship_id = slide_id.rId
+            slide_id_list.remove(slide_id)
+            prs.part.drop_rel(relationship_id)
+
+    # Put the retained end slate after all generated attribution slides.
+    slide_id_list.remove(end_slate_id)
+    slide_id_list.append(end_slate_id)
+
+
 def _create_ppt_from_dataframe(df, template_path, output_dir):
     os.makedirs(output_dir, exist_ok=True)
+
+    required_columns = {
+        "resource_name",
+        "attribution_type",
+        "attribution_text",
+    }
+    missing_columns = required_columns.difference(df.columns)
+
+    if missing_columns:
+        raise ValueError(
+            "The CSV is missing required column(s): "
+            + ", ".join(sorted(missing_columns))
+        )
 
     order = ["excluded", "permission", "aigen"]
     df = df.copy()
@@ -254,17 +307,36 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
 
     for resource_name, resource_group in df.groupby("resource_name"):
         prs = Presentation(template_path)
+        template_slide_count = len(prs.slides)
 
-        if len(prs.slides) < 3:
+        required_slide_numbers = [
+            EXCLUDED_SAMPLE_SLIDE_NUMBER,
+            PERMISSION_SAMPLE_SLIDE_NUMBER,
+            END_SLATE_TEMPLATE_SLIDE_NUMBER,
+        ]
+
+        if template_slide_count < max(required_slide_numbers):
             raise ValueError(
-                "The template must have at least 3 slides: slide 2 for "
-                "excluded and slide 3 for permission. "
-                f"Found {len(prs.slides)}."
+                f"The template has {template_slide_count} slides, but at "
+                f"least {max(required_slide_numbers)} are needed for the "
+                "excluded sample, permission sample, and end slate."
             )
 
-        # Slide 2 is the excluded example; slide 3 is the permission example.
-        excluded_sample_slide = prs.slides[1]
-        permission_sample_slide = prs.slides[2]
+        # Capture template slide IDs before appending generated slides.
+        original_slide_ids = list(prs.slides._sldIdLst)
+
+        # Slide 4 (prs.slides[3]) is the end slate to retain at the end.
+        end_slate_id = original_slide_ids[
+            END_SLATE_TEMPLATE_SLIDE_NUMBER - 1
+        ]
+
+        # These sample slides supply the layouts for generated slides.
+        excluded_sample_slide = prs.slides[
+            EXCLUDED_SAMPLE_SLIDE_NUMBER - 1
+        ]
+        permission_sample_slide = prs.slides[
+            PERMISSION_SAMPLE_SLIDE_NUMBER - 1
+        ]
 
         reference_layout_map = {
             "excluded": excluded_sample_slide.slide_layout,
@@ -272,15 +344,38 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
         }
 
         font_style_map = {
-            "excluded": get_template_font_style(prs, excluded_sample_slide),
-            "permission": get_template_font_style(prs, permission_sample_slide),
+            "excluded": get_template_font_style(
+                prs,
+                excluded_sample_slide,
+            ),
+            "permission": get_template_font_style(
+                prs,
+                permission_sample_slide,
+            ),
         }
+
+        # If slide 5 exists, use it as the aigen sample. Otherwise, aigen
+        # uses the excluded layout and its font styling.
+        if (
+            AIGEN_SAMPLE_SLIDE_NUMBER is not None
+            and template_slide_count >= AIGEN_SAMPLE_SLIDE_NUMBER
+        ):
+            aigen_sample_slide = prs.slides[
+                AIGEN_SAMPLE_SLIDE_NUMBER - 1
+            ]
+            reference_layout_map["aigen"] = aigen_sample_slide.slide_layout
+            font_style_map["aigen"] = get_template_font_style(
+                prs,
+                aigen_sample_slide,
+            )
+        else:
+            reference_layout_map["aigen"] = reference_layout_map["excluded"]
+            font_style_map["aigen"] = font_style_map["excluded"]
 
         for attribution_type, type_group in resource_group.groupby(
             "attribution_type",
             observed=True,
         ):
-            # Preserve the original behavior: aigen uses the excluded layout.
             slide_layout = reference_layout_map.get(
                 attribution_type,
                 reference_layout_map["excluded"],
@@ -297,9 +392,8 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
                 remaining = len(rows) - row_index
                 batch_size = min(MAX_ATTRIBUTIONS_PER_SLIDE, remaining)
 
-                # Add one slide. If the batch does not fit at 14 pt, try fewer
-                # entries in this same slide. Remaining entries go onto the
-                # next generated slide.
+                # Add a slide, then reduce the batch on that slide if needed.
+                # Remaining attributions are placed on following slides.
                 new_slide = prs.slides.add_slide(slide_layout)
                 body_shape = get_body_shape(new_slide)
 
@@ -311,7 +405,8 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
                 while batch_size >= 1:
                     batch = rows[row_index:row_index + batch_size]
                     body_text = "\n".join(
-                        get_attribution_text(row) for row in batch
+                        get_attribution_text(row)
+                        for row in batch
                     )
 
                     fitted_size = set_fitted_text(
@@ -325,32 +420,45 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
                         slide_fits = True
                         break
 
-                    # The text needs to be smaller than 14 pt. Try fewer
-                    # attributions on this same slide.
+                    # Retry fewer entries on this same slide.
                     batch_size -= 1
 
                 if not slide_fits:
-                    text = get_attribution_text(rows[row_index])
+                    attribution_text = get_attribution_text(rows[row_index])
                     raise ValueError(
                         f"An individual attribution cannot fit at "
                         f"{MIN_FONT_SIZE} pt. Resource: {resource_name!r}; "
-                        f"type: {attribution_type!r}; text: {text!r}. "
-                        "Shorten the attribution or enlarge the placeholder "
-                        "in the template."
+                        f"type: {attribution_type!r}; "
+                        f"text: {attribution_text!r}. Shorten the text or "
+                        "enlarge the placeholder in the template."
                     )
 
-        output_filename = f"{safe_filename_part(resource_name)}_slates.pptx"
+        # Retain only generated slides and the original end slate, with the
+        # end slate as the final slide.
+        retain_generated_slides_and_end_slate(
+            prs,
+            original_slide_ids,
+            end_slate_id,
+        )
+
+        output_filename = (
+            f"{safe_filename_part(resource_name)}_slates.pptx"
+        )
         output_path = os.path.join(output_dir, output_filename)
         prs.save(output_path)
-        print(f"Presentation saved: {output_path}")
+        print(f"✅ Presentation saved: {output_path}")
 
 
-def create_ppt_from_dataframe(df, template_path, output_dir, font_dir=None):
+def create_ppt_from_dataframe(
+    df,
+    template_path,
+    output_dir,
+    font_dir=None,
+):
     """
     Generate one presentation per resource_name.
 
-    font_dir should contain the uploaded .ttf/.otf files extracted by the Flask
-    app. Font search/cache updates and generation are protected by a lock.
+    font_dir should contain the font files uploaded with the web-app request.
     """
     with _FONT_LOCK:
         configure_font_search(font_dir)
@@ -364,10 +472,11 @@ def main():
     font_dir = input("Enter folder containing font files: ")
 
     df = pd.read_csv(csv_path)
+
     create_ppt_from_dataframe(
-        df,
-        template_path,
-        output_dir,
+        df=df,
+        template_path=template_path,
+        output_dir=output_dir,
         font_dir=font_dir,
     )
 

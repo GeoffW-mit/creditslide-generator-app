@@ -11,7 +11,6 @@ Author: Geoffrey Wilson
 
 import os
 import re
-import sys
 import threading
 
 import pandas as pd
@@ -26,22 +25,22 @@ MAX_ATTRIBUTIONS_PER_SLIDE = 4
 MAX_FONT_SIZE = 18
 MIN_FONT_SIZE = 14
 
-# Slide numbers here are 1-based.
+# Template slide numbers are 1-based.
 EXCLUDED_SAMPLE_SLIDE_NUMBER = 2
 PERMISSION_SAMPLE_SLIDE_NUMBER = 3
 END_SLATE_TEMPLATE_SLIDE_NUMBER = 4
 
-# From the attached script: use slide 5 as the aigen sample if it exists.
-# If the template has no slide 5, aigen falls back to the excluded layout.
+# If slide 5 is present, use it as the aigen sample.
+# Otherwise, aigen uses the excluded layout.
 AIGEN_SAMPLE_SLIDE_NUMBER = 5
 
 DRAWINGML_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
-# python-pptx keeps a process-wide font cache. This lock prevents concurrent
-# requests from changing or scanning the cache at the same time.
+# python-pptx maintains a process-wide font cache. This lock prevents
+# simultaneous requests from updating or scanning that cache at once.
 _FONT_LOCK = threading.RLock()
 
-# Retain python-pptx's original method before configuring font search paths.
+# Keep the original method before configuring Linux font search paths.
 _ORIGINAL_FONT_DIRECTORIES = FontFiles._font_directories
 
 
@@ -75,20 +74,20 @@ def configure_font_search(font_dir=None):
             unique_directories.append(directory)
             seen.add(directory)
 
-    # Override python-pptx's platform font-directory method for this process.
+    # Override python-pptx's font-directory lookup for this process.
     FontFiles._font_directories = classmethod(
         lambda cls: list(unique_directories)
     )
 
-    # Make python-pptx rescan so it can find fonts uploaded with this request.
+    # Force a rescan so python-pptx can find the uploaded fonts.
     FontFiles._font_files = None
 
 
 def get_template_font_style(prs, sample_slide):
-    """Get the BODY font family and styling from a sample slide."""
+    """Get BODY font family and styling from a sample slide."""
     body_shape = None
 
-    # Prefer the BODY placeholder with index 2, matching the original script.
+    # Prefer BODY placeholder index 2, matching the original script.
     for shape in sample_slide.placeholders:
         if (
             shape.placeholder_format.type == PP_PLACEHOLDER.BODY
@@ -97,7 +96,7 @@ def get_template_font_style(prs, sample_slide):
             body_shape = shape
             break
 
-    # Otherwise, use the first BODY placeholder.
+    # Otherwise use the first BODY placeholder.
     if body_shape is None:
         for shape in sample_slide.placeholders:
             if shape.placeholder_format.type == PP_PLACEHOLDER.BODY:
@@ -126,7 +125,7 @@ def get_template_font_style(prs, sample_slide):
             if font_family is not None:
                 break
 
-    # If the sample placeholder inherits its font, use the theme body font.
+    # If the sample placeholder inherits its font, look for the theme body font.
     if font_family is None and prs.slide_masters:
         for rel in prs.slide_masters[0].part.rels.values():
             if rel.reltype.endswith("/theme"):
@@ -183,10 +182,10 @@ def add_fallback_textbox(slide, prs):
 
 def set_fitted_text(shape, text, font_style):
     """
-    Fit text at up to 18 pt using the font family from the template.
+    Fit text at up to 18 pt using the template's font.
 
-    Returns the size selected by python-pptx. The caller checks if it is at
-    least 14 pt.
+    Returns the font size selected by python-pptx. The caller checks whether
+    it is at least 14 pt.
     """
     text_frame = shape.text_frame
     text_frame.text = text
@@ -218,7 +217,7 @@ def set_fitted_text(shape, text, font_style):
 
     fitted_size = min(fitted_sizes, default=MAX_FONT_SIZE)
 
-    # Apply the calculated size and retain the template's font styling.
+    # Keep the template font and styling while applying the fitted size.
     for paragraph in text_frame.paragraphs:
         for run in paragraph.runs:
             run.font.name = font_style["font_family"]
@@ -243,11 +242,73 @@ def get_attribution_text(row):
     return str(value).strip()
 
 
-def safe_filename_part(value):
-    """Make a resource name safe to use in an output filename."""
-    text = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value))
-    text = text.strip("._")
-    return text or "resource"
+def required_text(value, column_name):
+    """Return a non-empty string value or raise an informative error."""
+    if pd.isna(value):
+        raise ValueError(f"The CSV has a blank value in {column_name!r}.")
+
+    text = str(value).strip()
+
+    if not text:
+        raise ValueError(f"The CSV has a blank value in {column_name!r}.")
+
+    return text
+
+
+def filename_component(value):
+    """Sanitize one filename component while preserving letters, digits, _ and -."""
+    text = str(value).strip()
+    cleaned = []
+
+    for character in text:
+        if character.isalnum() or character in {"_", "-"}:
+            cleaned.append(character)
+        elif character.isspace():
+            cleaned.append("-")
+
+    result = "".join(cleaned).strip("-_")
+    return result or "unknown"
+
+
+def text_before_space_dash(value, column_name):
+    """
+    Return the part before the first space followed by a dash.
+
+    Examples:
+        'Selin - Introduction' -> 'Selin'
+        'S1 - Introduction'    -> 'S1'
+    """
+    text = required_text(value, column_name)
+    prefix = re.split(r"\s+-", text, maxsplit=1)[0].strip()
+
+    if not prefix:
+        raise ValueError(
+            f"Could not derive the filename part from {column_name!r}: "
+            f"{text!r}"
+        )
+
+    return prefix
+
+
+def make_output_filename(course_number, video_edit_id, lecture_name, resource_name):
+    """
+    Build a filename like UCE_0004_Selin_S1.pptx.
+    """
+    course_text = required_text(course_number, "course_number")
+    program = course_text.split(".", 1)[0].strip()
+
+    video_id = required_text(video_edit_id, "video_edit_id")
+    last_name = text_before_space_dash(lecture_name, "lecture_name")
+    segment = text_before_space_dash(resource_name, "resource_name")
+
+    parts = [
+        filename_component(program),
+        filename_component(video_id),
+        filename_component(last_name),
+        filename_component(segment),
+    ]
+
+    return "_".join(parts) + "_slates.pptx"
 
 
 def retain_generated_slides_and_end_slate(
@@ -255,11 +316,10 @@ def retain_generated_slides_and_end_slate(
     original_slide_ids,
     end_slate_id,
 ):
-    """Keep generated slides plus the original end slate, and move it last."""
+    """Keep generated slides and the original end slate; move end slate last."""
     slide_id_list = prs.slides._sldIdLst
     original_ids = {slide_id.id for slide_id in original_slide_ids}
 
-    # Generated slide IDs were not part of the template.
     generated_slide_ids = [
         slide_id
         for slide_id in list(slide_id_list)
@@ -276,7 +336,7 @@ def retain_generated_slides_and_end_slate(
             slide_id_list.remove(slide_id)
             prs.part.drop_rel(relationship_id)
 
-    # Put the retained end slate after all generated attribution slides.
+    # Put the retained end slate after all generated slides.
     slide_id_list.remove(end_slate_id)
     slide_id_list.append(end_slate_id)
 
@@ -288,6 +348,9 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
         "resource_name",
         "attribution_type",
         "attribution_text",
+        "video_edit_id",
+        "course_number",
+        "lecture_name",
     }
     missing_columns = required_columns.difference(df.columns)
 
@@ -305,7 +368,27 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
         ordered=True,
     )
 
-    for resource_name, resource_group in df.groupby("resource_name"):
+    # One deck per video segment. Group on all fields used to identify/name it.
+    group_columns = [
+        "course_number",
+        "video_edit_id",
+        "lecture_name",
+        "resource_name",
+    ]
+
+    for group_values, resource_group in df.groupby(
+        group_columns,
+        dropna=False,
+        sort=False,
+        observed=True,
+    ):
+        (
+            course_number,
+            video_edit_id,
+            lecture_name,
+            resource_name,
+        ) = group_values
+
         prs = Presentation(template_path)
         template_slide_count = len(prs.slides)
 
@@ -318,19 +401,18 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
         if template_slide_count < max(required_slide_numbers):
             raise ValueError(
                 f"The template has {template_slide_count} slides, but at "
-                f"least {max(required_slide_numbers)} are needed for the "
+                f"least {max(required_slide_numbers)} are required for the "
                 "excluded sample, permission sample, and end slate."
             )
 
-        # Capture template slide IDs before appending generated slides.
+        # Capture original template slide IDs before adding generated slides.
         original_slide_ids = list(prs.slides._sldIdLst)
 
-        # Slide 4 (prs.slides[3]) is the end slate to retain at the end.
+        # Slide 4 is retained as the end slate and moved to the final position.
         end_slate_id = original_slide_ids[
             END_SLATE_TEMPLATE_SLIDE_NUMBER - 1
         ]
 
-        # These sample slides supply the layouts for generated slides.
         excluded_sample_slide = prs.slides[
             EXCLUDED_SAMPLE_SLIDE_NUMBER - 1
         ]
@@ -354,8 +436,7 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
             ),
         }
 
-        # If slide 5 exists, use it as the aigen sample. Otherwise, aigen
-        # uses the excluded layout and its font styling.
+        # Use slide 5 as aigen's sample if it exists; otherwise use excluded.
         if (
             AIGEN_SAMPLE_SLIDE_NUMBER is not None
             and template_slide_count >= AIGEN_SAMPLE_SLIDE_NUMBER
@@ -376,6 +457,7 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
             "attribution_type",
             observed=True,
         ):
+            # Keep the original fallback behavior for unrecognized categories.
             slide_layout = reference_layout_map.get(
                 attribution_type,
                 reference_layout_map["excluded"],
@@ -392,8 +474,9 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
                 remaining = len(rows) - row_index
                 batch_size = min(MAX_ATTRIBUTIONS_PER_SLIDE, remaining)
 
-                # Add a slide, then reduce the batch on that slide if needed.
-                # Remaining attributions are placed on following slides.
+                # Add one slide. If the batch does not fit at 14 pt or larger,
+                # reduce the batch on this same slide. Remaining entries are
+                # added to subsequent slides.
                 new_slide = prs.slides.add_slide(slide_layout)
                 body_shape = get_body_shape(new_slide)
 
@@ -420,7 +503,6 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
                         slide_fits = True
                         break
 
-                    # Retry fewer entries on this same slide.
                     batch_size -= 1
 
                 if not slide_fits:
@@ -433,18 +515,20 @@ def _create_ppt_from_dataframe(df, template_path, output_dir):
                         "enlarge the placeholder in the template."
                     )
 
-        # Retain only generated slides and the original end slate, with the
-        # end slate as the final slide.
         retain_generated_slides_and_end_slate(
             prs,
             original_slide_ids,
             end_slate_id,
         )
 
-        output_filename = (
-            f"{safe_filename_part(resource_name)}_slates.pptx"
+        output_filename = make_output_filename(
+            course_number=course_number,
+            video_edit_id=video_edit_id,
+            lecture_name=lecture_name,
+            resource_name=resource_name,
         )
         output_path = os.path.join(output_dir, output_filename)
+
         prs.save(output_path)
         print(f"✅ Presentation saved: {output_path}")
 
@@ -456,7 +540,7 @@ def create_ppt_from_dataframe(
     font_dir=None,
 ):
     """
-    Generate one presentation per resource_name.
+    Generate one presentation per video segment.
 
     font_dir should contain the font files uploaded with the web-app request.
     """
@@ -471,7 +555,16 @@ def main():
     output_dir = input("Enter output directory: ")
     font_dir = input("Enter folder containing font files: ")
 
-    df = pd.read_csv(csv_path)
+    # Read identifier columns as strings so values like "0004" retain zeros.
+    df = pd.read_csv(
+        csv_path,
+        dtype={
+            "video_edit_id": "string",
+            "course_number": "string",
+            "lecture_name": "string",
+            "resource_name": "string",
+        },
+    )
 
     create_ppt_from_dataframe(
         df=df,

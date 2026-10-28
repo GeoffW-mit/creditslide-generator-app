@@ -195,7 +195,15 @@ def process():
 
         font_count = save_uploaded_fonts(font_uploads, fonts_dir)
 
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(
+            csv_path,
+            dtype={
+                "video_edit_id": "string",
+                "course_number": "string",
+                "lecture_name": "string",
+                "resource_name": "string",
+            },
+        )
 
         required_columns = {
             "attribution_type",
